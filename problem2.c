@@ -6,10 +6,12 @@
 
 pthread_cond_t condition_w,condition_r;
 pthread_mutex_t mutex, mutex_c, mutex2;
+sem_t sem_r, sem_w;
 void *writer();
 void *reader();
 int library_w = 0;
 int library_r = 0;
+int waiting_w = 0;
 
 int main(int argc, char*argv[]){
 
@@ -26,7 +28,7 @@ int main(int argc, char*argv[]){
     
     if(pthread_mutex_init(&mutex,NULL)==-1||pthread_mutex_init(&mutex_c,NULL)==-1||
     pthread_cond_init(&condition_r,NULL)==-1||pthread_mutex_init(&mutex2,NULL)==-1||
-    pthread_cond_init(&condition_w,NULL)==-1){
+    pthread_cond_init(&condition_w,NULL)==-1||sem_init(&sem_r,0,1)==-1){
         perror("init error");
         exit(-1);
     }
@@ -47,59 +49,54 @@ int main(int argc, char*argv[]){
     }
 
 }
-//enter types writer=w and reader=r
-void enter_library(char type){
-
-    if(type=='r'){
-        library_r++;
-    }else if(type=='w'){
-        library_w++;
-    }else
-        perror("wrong writer&reader encodings in code");
-    printf("%c entered the library\nthere are: %d readers and %d writers\n\n",type,library_r,library_w);
-}
-void leave_library(char type){
-
-    if(type=='r'){
-        library_r--;
-    }else if(type=='w'){
-        library_w--;
-    }else
-        perror("wrong writer&reader encodings in code");
-    printf("%c left the library\nthere are still: %d readers and %d writers\n\n",type,library_r,library_w);
-}
 
 void *writer(){
 
     
     while(1){
+
         pthread_mutex_lock(&mutex_c);
-        enter_library('w');
+        waiting_w++;
+        while(library_w!=0||library_r!=0){
+            pthread_cond_wait(&condition_w,&mutex_c);
+        }
+        waiting_w--;
+        library_w++;
+        printf("writer entered the library\nthere are: %d readers and %d writers\n\n",library_r,library_w);
+        pthread_mutex_unlock(&mutex_c);
+    
         sleep(1);
-        leave_library('w');
-        if(library_r==0){
-            pthread_cond_broadcast(&condition_r);
-            printf("signaled r\n");}
-        pthread_cond_wait(&condition_w,&mutex_c);
-        printf("wake up!\n");
+
+        pthread_mutex_lock(&mutex_c);
+        library_w--;
+        printf("writer left the library\nthere are still: %d readers and %d writers\n\n",library_r,library_w);
+        pthread_cond_broadcast(&condition_w);
+        pthread_mutex_unlock(&mutex_c);
+
+        sleep(1);
+        
     }
 }
 void *reader(){
 
     while(1){
 
-        sleep(1);
-        pthread_mutex_lock(&mutex);
-        enter_library('r');
-        pthread_mutex_unlock(&mutex);
+        pthread_mutex_lock(&mutex_c);
+        while(library_w){
+            pthread_cond_wait(&condition_w,&mutex_c);
+        }
+        library_r++;
+        printf("reader entered the library\nthere are: %d readers and %d writers\n\n",library_r,library_w);
+        pthread_mutex_unlock(&mutex_c);
 
         sleep(1);
 
-        pthread_mutex_lock(&mutex2);
-        leave_library('r');
-        if(library_r==0){
-            pthread_cond_signal(&condition_w);
-            printf("signaled w\n");}
-        pthread_cond_wait(&condition_r,&mutex2);
+        //leave
+        pthread_mutex_lock(&mutex_c);
+        library_r--;
+        printf("reader left the library\nthere are still: %d readers and %d writers\n\n",library_r,library_w);
+        pthread_cond_signal(&condition_w);
+        pthread_mutex_unlock(&mutex_c);
+
     }
 }
